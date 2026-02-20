@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">banking_ekyc</string>
+    <string name="the_next_nlevel_mobile_nbank_system">The next \nlevel mobile \nbank system</string>
+    <string name="start_managing_your_finanaces_from_now_on_nfor_the_future_you_will_face">Start managing your finanaces from now on \nfor the future you will face</string>
+    <string name="get_started">Get Started</string>
+    <string name="order">Order</string>
+    <string name="income">income</string>
+    <string name="outcome">Outcome</string>
+    <string name="trade">Trade</string>
+    <string name="market">Market</string>
+    <string name="convert">Convert</string>
+    <string name="jun_2025">Jun 2025</string>
+    <string name="recent_transaction">Recent Transaction</string>
+    <string name="statistic">Statistic</string>
+    <string name="see_more">See More</string>
+</resources>

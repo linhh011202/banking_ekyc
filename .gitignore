@@ -1,0 +1,69 @@
+# ========================
+# Android build artifacts
+# ========================
+*.iml
+.gradle/
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# ========================
+# Local config - SENSITIVE
+# ========================
+local.properties
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+
+# ========================
+# API keys & secrets - SENSITIVE
+# ========================
+secrets.properties
+api_keys.properties
+config.properties
+*.env
+.env
+.env.local
+.env.production
+
+# ========================
+# Firebase - SENSITIVE
+# ========================
+google-services.json
+GoogleService-Info.plist
+firebase.json
+.firebaserc
+
+# ========================
+# IDE - IntelliJ / Android Studio
+# ========================
+/.idea/caches/
+/.idea/libraries/
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+/.idea/.name
+/.idea/deploymentTargetDropDown.xml
+/.idea/render.experimental.xml
+.DS_Store
+
+# ========================
+# Kotlin
+# ========================
+.kotlin/
+
+# ========================
+# Gradle
+# ========================
+gradle-wrapper.jar
+
+# ========================
+# Misc
+# ========================
+*.orig
+*.bak
+*.tmp

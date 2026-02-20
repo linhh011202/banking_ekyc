@@ -1,0 +1,13 @@
+# Build artifacts
+/build/
+
+# Firebase - SENSITIVE: contains project ID, API keys, OAuth client ID
+google-services.json
+
+# Signing keystore - SENSITIVE
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+release.properties
