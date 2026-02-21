@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 
 private const val LOGIN_PHOTOS_COUNT = 3
 private const val LOGIN_CAPTURE_INTERVAL_MS = 600L
-private const val LOGIN_FACE_SIZE_THRESHOLD = 0.35f
+private const val LOGIN_FACE_SIZE_THRESHOLD = 0.55f
 private const val LOGIN_TOTAL_TICKS = 72
 
 /**
@@ -56,6 +56,7 @@ fun FaceLoginScanScreen(
     var isCapturing by remember { mutableStateOf(false) }
     var isDone by remember { mutableStateOf(false) }
     var captureStatus by remember { mutableStateOf("") }
+    var validationResult by remember { mutableStateOf(FaceValidationResult.VALID) }
 
     val captureScope = rememberCoroutineScope()
     val faceDetected = detectedFaces.isNotEmpty()
@@ -66,12 +67,27 @@ fun FaceLoginScanScreen(
         (0 until filled).toSet()
     }
 
+    // Continuously validate face
+    LaunchedEffect(detectedFaces) {
+        if (detectedFaces.isNotEmpty() && !isCapturing && !isDone) {
+            val face = detectedFaces.first()
+            validationResult = FaceValidator.validate(face, imageWidth, scanPhase = null)
+        } else if (detectedFaces.isEmpty()) {
+            validationResult = FaceValidationResult(
+                isValid = false,
+                warningMessage = "No face detected"
+            )
+        }
+    }
+
     LaunchedEffect(Unit) {
         while (!isDone && !isCapturing) {
             if (detectedFaces.isNotEmpty()) {
                 val face = detectedFaces.first()
+                val result = FaceValidator.validate(face, imageWidth, scanPhase = null)
+                validationResult = result
                 val faceRatio = face.boundingBox.width().toFloat() / imageWidth.coerceAtLeast(1)
-                if (faceRatio > LOGIN_FACE_SIZE_THRESHOLD) {
+                if (result.isValid && faceRatio > LOGIN_FACE_SIZE_THRESHOLD) {
                     Log.d("FaceLoginScan", "Face detected! Starting capture.")
                     captureScope.launch {
                         isCapturing = true
@@ -157,9 +173,24 @@ fun FaceLoginScanScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
 
+            val instructionText = when {
+                isDone -> "Done!"
+                !faceDetected -> "Place your face in the frame"
+                !validationResult.isValid -> validationResult.warningMessage
+                else -> "Look straight at the camera"
+            }
+
+            val instructionColor = when {
+                isDone -> Color.White
+                !faceDetected -> Color.White
+                !validationResult.isValid && (validationResult.hasMask || validationResult.hasSunglasses || validationResult.isFaceObstructed) -> Color(0xFFFF5252)
+                !validationResult.isValid -> Color(0xFFFFAB40)
+                else -> Color.White
+            }
+
             Text(
-                text = if (isDone) "Done!" else "Look straight at the camera",
-                color = Color.White,
+                text = instructionText,
+                color = instructionColor,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
@@ -176,7 +207,20 @@ fun FaceLoginScanScreen(
 
                 if (faceDetected && !isCapturing) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Move your face closer", color = Color(0xAAFFFFFF), fontSize = 13.sp)
+                    val hintText = when {
+                        validationResult.hasMask -> "⚠ Mask detected"
+                        validationResult.hasSunglasses -> "⚠ Sunglasses detected"
+                        validationResult.isFaceObstructed -> "⚠ Face is obstructed"
+                        !validationResult.eyesOpen -> "⚠ Please open your eyes"
+                        !validationResult.isValid -> validationResult.warningMessage
+                        else -> "Move your face closer"
+                    }
+                    val hintColor = if (validationResult.hasMask || validationResult.hasSunglasses || validationResult.isFaceObstructed || !validationResult.eyesOpen) {
+                        Color(0xFFFF5252)
+                    } else {
+                        Color(0xAAFFFFFF)
+                    }
+                    Text(text = hintText, color = hintColor, fontSize = 13.sp)
                 }
 
                 if (isCapturing) {

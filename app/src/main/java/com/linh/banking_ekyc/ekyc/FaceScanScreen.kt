@@ -1,5 +1,7 @@
 package com.linh.banking_ekyc.ekyc
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -28,13 +30,12 @@ import com.google.mlkit.vision.face.Face
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 
 private const val TOTAL_TICKS = 72
 private const val PHOTOS_PER_PHASE = 3
 private const val CAPTURE_INTERVAL_MS = 600L
-private const val FACE_SIZE_THRESHOLD = 0.35f
-private const val EULER_Y_THRESHOLD = 20f
 
 enum class ScanPhase {
     FACE_CENTER,
@@ -66,6 +67,7 @@ fun FaceScanScreen(
     var photosInCurrentPhase by remember { mutableIntStateOf(0) }
     var isCapturing by remember { mutableStateOf(false) }
     var captureStatus by remember { mutableStateOf("") }
+    var validationResult by remember { mutableStateOf(FaceValidationResult.VALID) }
 
     val captureScope = rememberCoroutineScope()
     val faceDetected = detectedFaces.isNotEmpty()
@@ -86,24 +88,23 @@ fun FaceScanScreen(
     }
 
     fun isPhaseConditionMet(face: Face): Boolean {
-        val result = when (scanPhase) {
-            ScanPhase.FACE_CENTER -> {
-                val faceRatio = face.boundingBox.width().toFloat() / imageWidth.coerceAtLeast(1)
-                Log.d("FaceScan", "FACE_CENTER check: faceRatio=$faceRatio, threshold=$FACE_SIZE_THRESHOLD, imageWidth=$imageWidth")
-                faceRatio > FACE_SIZE_THRESHOLD
-            }
-            ScanPhase.TURN_LEFT -> {
-                Log.d("FaceScan", "TURN_LEFT check: eulerY=${face.headEulerAngleY}, threshold=$EULER_Y_THRESHOLD")
-                face.headEulerAngleY > EULER_Y_THRESHOLD
-            }
-            ScanPhase.TURN_RIGHT -> {
-                Log.d("FaceScan", "TURN_RIGHT check: eulerY=${face.headEulerAngleY}, threshold=-$EULER_Y_THRESHOLD")
-                face.headEulerAngleY < -EULER_Y_THRESHOLD
-            }
-            ScanPhase.COMPLETED -> false
+        val result = FaceValidator.validate(face, imageWidth, scanPhase)
+        validationResult = result
+        Log.d("FaceScan", "Phase ${scanPhase.name} validation: valid=${result.isValid}, msg=${result.warningMessage}")
+        return result.isValid
+    }
+
+    // Continuously validate face even when not trying to capture
+    LaunchedEffect(detectedFaces, scanPhase) {
+        if (detectedFaces.isNotEmpty() && !isCapturing && scanPhase != ScanPhase.COMPLETED) {
+            val face = detectedFaces.first()
+            validationResult = FaceValidator.validate(face, imageWidth, scanPhase)
+        } else if (detectedFaces.isEmpty()) {
+            validationResult = FaceValidationResult(
+                isValid = false,
+                warningMessage = "No face detected"
+            )
         }
-        Log.d("FaceScan", "Phase ${scanPhase.name} condition met: $result")
-        return result
     }
 
     LaunchedEffect(scanPhase) {
@@ -212,16 +213,29 @@ fun FaceScanScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            val instructionText = when (scanPhase) {
-                ScanPhase.FACE_CENTER -> "Move your face closer"
-                ScanPhase.TURN_LEFT -> "Turn left"
-                ScanPhase.TURN_RIGHT -> "Turn right"
-                ScanPhase.COMPLETED -> "Done!"
+            val instructionText = when {
+                scanPhase == ScanPhase.COMPLETED -> "Done!"
+                !faceDetected -> "Place your face in the frame"
+                !validationResult.isValid -> validationResult.warningMessage
+                else -> when (scanPhase) {
+                    ScanPhase.FACE_CENTER -> "Look straight at the camera"
+                    ScanPhase.TURN_LEFT -> "Turn your head left"
+                    ScanPhase.TURN_RIGHT -> "Turn your head right"
+                    ScanPhase.COMPLETED -> "Done!"
+                }
+            }
+
+            val instructionColor = when {
+                scanPhase == ScanPhase.COMPLETED -> Color.White
+                !faceDetected -> Color.White
+                !validationResult.isValid && (validationResult.hasMask || validationResult.hasSunglasses || validationResult.isFaceObstructed) -> Color(0xFFFF5252)
+                !validationResult.isValid -> Color(0xFFFFAB40)
+                else -> Color.White
             }
 
             Text(
                 text = instructionText,
-                color = Color.White,
+                color = instructionColor,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
@@ -246,14 +260,26 @@ fun FaceScanScreen(
 
                 if (faceDetected && !isCapturing) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    val hintText = when (scanPhase) {
-                        ScanPhase.FACE_CENTER -> "Move your face closer"
-                        ScanPhase.TURN_LEFT -> "Turn your head further left"
-                        ScanPhase.TURN_RIGHT -> "Turn your head further right"
-                        else -> ""
+                    val hintText = when {
+                        validationResult.hasMask -> "⚠ Mask detected"
+                        validationResult.hasSunglasses -> "⚠ Sunglasses detected"
+                        validationResult.isFaceObstructed -> "⚠ Face is obstructed"
+                        !validationResult.eyesOpen -> "⚠ Please open your eyes"
+                        !validationResult.isValid -> validationResult.warningMessage
+                        else -> when (scanPhase) {
+                            ScanPhase.FACE_CENTER -> "Hold still, preparing to capture..."
+                            ScanPhase.TURN_LEFT -> "Turn your head further left"
+                            ScanPhase.TURN_RIGHT -> "Turn your head further right"
+                            else -> ""
+                        }
+                    }
+                    val hintColor = if (validationResult.hasMask || validationResult.hasSunglasses || validationResult.isFaceObstructed || !validationResult.eyesOpen) {
+                        Color(0xFFFF5252)
+                    } else {
+                        Color(0xAAFFFFFF)
                     }
                     if (hintText.isNotEmpty()) {
-                        Text(text = hintText, color = Color(0xAAFFFFFF), fontSize = 13.sp)
+                        Text(text = hintText, color = hintColor, fontSize = 13.sp)
                     }
                 }
 
@@ -287,8 +313,12 @@ fun FaceScanScreen(
 }
 
 /**
- * Captures a single photo and returns the JPEG bytes directly in memory (no file saved).
+ * Captures a single photo, downscales to [maxDimension] px and compresses
+ * to JPEG at [quality]%. Returns the compressed bytes directly in memory.
  */
+private const val CAPTURE_MAX_DIMENSION = 640
+private const val CAPTURE_JPEG_QUALITY = 80
+
 internal suspend fun capturePhotoBytes(
     imageCapture: ImageCapture?,
     executor: java.util.concurrent.Executor
@@ -303,11 +333,14 @@ internal suspend fun capturePhotoBytes(
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
                     val buffer = image.planes[0].buffer
-                    val bytes = ByteArray(buffer.remaining())
-                    buffer.get(bytes)
+                    val rawBytes = ByteArray(buffer.remaining())
+                    buffer.get(rawBytes)
                     image.close()
-                    Log.d("FaceScan", "✓ Captured in-memory (${bytes.size} bytes)")
-                    cont.resume(bytes)
+
+                    // Downscale + compress
+                    val compressed = compressPhoto(rawBytes)
+                    Log.d("FaceScan", "✓ Captured: raw=${rawBytes.size / 1024}KB → compressed=${compressed.size / 1024}KB")
+                    cont.resume(compressed)
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -318,3 +351,46 @@ internal suspend fun capturePhotoBytes(
         )
     }
 }
+
+/**
+ * Downscales a JPEG byte array so that the longest side is at most
+ * [CAPTURE_MAX_DIMENSION] px, then re-encodes at [CAPTURE_JPEG_QUALITY]%.
+ */
+private fun compressPhoto(rawBytes: ByteArray): ByteArray {
+    // Decode bounds only
+    val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, opts)
+    val origW = opts.outWidth
+    val origH = opts.outHeight
+
+    // Calculate inSampleSize (power of 2 downscale for speed)
+    var sampleSize = 1
+    val longestSide = maxOf(origW, origH)
+    while (longestSide / sampleSize > CAPTURE_MAX_DIMENSION * 2) {
+        sampleSize *= 2
+    }
+
+    // Decode with sample size
+    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    val sampled = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts)
+        ?: return rawBytes // fallback
+
+    // Fine-scale to exact max dimension
+    val scale = CAPTURE_MAX_DIMENSION.toFloat() / maxOf(sampled.width, sampled.height).coerceAtLeast(1)
+    val bitmap = if (scale < 1f) {
+        val newW = (sampled.width * scale).toInt().coerceAtLeast(1)
+        val newH = (sampled.height * scale).toInt().coerceAtLeast(1)
+        Bitmap.createScaledBitmap(sampled, newW, newH, true).also {
+            if (it !== sampled) sampled.recycle()
+        }
+    } else {
+        sampled
+    }
+
+    // Compress to JPEG
+    val out = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.JPEG, CAPTURE_JPEG_QUALITY, out)
+    bitmap.recycle()
+    return out.toByteArray()
+}
+
