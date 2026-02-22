@@ -26,16 +26,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 
 private const val TOTAL_TICKS = 72
 private const val PHOTOS_PER_PHASE = 3
-private const val CAPTURE_INTERVAL_MS = 600L
+private const val CAPTURE_INTERVAL_MS = 150L
 
 enum class ScanPhase {
     FACE_CENTER,
@@ -68,8 +70,9 @@ fun FaceScanScreen(
     var isCapturing by remember { mutableStateOf(false) }
     var captureStatus by remember { mutableStateOf("") }
     var validationResult by remember { mutableStateOf(FaceValidationResult.VALID) }
+    /** Incremented when capture fails to restart the validation loop */
+    var retryTrigger by remember { mutableIntStateOf(0) }
 
-    val captureScope = rememberCoroutineScope()
     val faceDetected = detectedFaces.isNotEmpty()
 
     val ticksPerPhase = TOTAL_TICKS / 3
@@ -107,8 +110,9 @@ fun FaceScanScreen(
         }
     }
 
-    LaunchedEffect(scanPhase) {
+    LaunchedEffect(scanPhase, retryTrigger) {
         if (scanPhase == ScanPhase.COMPLETED || isCapturing) return@LaunchedEffect
+        FaceValidator.resetStableCounter()
         Log.d("FaceScan", "Waiting for phase ${scanPhase.name} condition...")
 
         while (scanPhase != ScanPhase.COMPLETED && !isCapturing) {
@@ -116,42 +120,77 @@ fun FaceScanScreen(
                 val face = detectedFaces.first()
                 if (isPhaseConditionMet(face)) {
                     Log.d("FaceScan", "Condition met! Starting capture for phase ${scanPhase.name}")
+                    isCapturing = true
+                    captureStatus = "Starting capture..."
 
-                    captureScope.launch {
-                        isCapturing = true
-                        captureStatus = "Starting capture..."
+                    var i = 0
+                    var consecutiveFailures = 0
+                    val maxConsecutiveFailures = 10
 
-                        for (i in 0 until PHOTOS_PER_PHASE) {
-                            captureStatus = "Capturing photo ${i + 1}/${PHOTOS_PER_PHASE}..."
-                            Log.d("FaceScan", "Taking photo ${i + 1}...")
-
-                            val bytes = capturePhotoBytes(imageCapture, ContextCompat.getMainExecutor(context))
-                            if (bytes != null) {
-                                capturedPhotos = capturedPhotos + bytes
-                                photosInCurrentPhase++
-                                Log.d("FaceScan", "Captured photo ${capturedPhotos.size} (${bytes.size} bytes)")
-                                captureStatus = "✓ Captured ${photosInCurrentPhase}/${PHOTOS_PER_PHASE}"
-                            } else {
-                                Log.e("FaceScan", "Failed to capture photo ${i + 1}")
-                                captureStatus = "✗ Capture error"
-                            }
-                            delay(CAPTURE_INTERVAL_MS)
+                    while (i < PHOTOS_PER_PHASE && consecutiveFailures < maxConsecutiveFailures) {
+                        // Quick check: is a face still visible in live preview?
+                        if (detectedFaces.isEmpty()) {
+                            captureStatus = "Face lost — hold still"
+                            consecutiveFailures++
+                            delay(200)
+                            continue
                         }
 
-                        captureStatus = ""
-                        photosInCurrentPhase = 0
-                        scanPhase = when (scanPhase) {
-                            ScanPhase.FACE_CENTER -> ScanPhase.TURN_LEFT
-                            ScanPhase.TURN_LEFT -> ScanPhase.TURN_RIGHT
-                            ScanPhase.TURN_RIGHT -> {
-                                onCompleted(capturedPhotos)
-                                ScanPhase.COMPLETED
+                        captureStatus = "Capturing photo ${i + 1}/${PHOTOS_PER_PHASE}..."
+                        Log.d("FaceScan", "Taking photo ${i + 1}...")
+
+                        val bytes = capturePhotoBytes(imageCapture, ContextCompat.getMainExecutor(context))
+                        if (bytes != null) {
+                            // Post-capture validation: THE definitive check
+                            val hasFace = validateCapturedPhoto(bytes)
+                            if (!hasFace) {
+                                captureStatus = "⚠ Face not clear — retrying"
+                                Log.w("FaceScan", "Post-capture validation FAILED — discarding photo")
+                                consecutiveFailures++
+                                delay(150)
+                                continue
                             }
-                            ScanPhase.COMPLETED -> ScanPhase.COMPLETED
+                            consecutiveFailures = 0
+                            capturedPhotos = capturedPhotos + bytes
+                            photosInCurrentPhase++
+                            Log.d("FaceScan", "Captured photo ${capturedPhotos.size} (${bytes.size} bytes)")
+                            captureStatus = "✓ Captured ${photosInCurrentPhase}/${PHOTOS_PER_PHASE}"
+                            i++
+                        } else {
+                            Log.e("FaceScan", "Failed to capture photo ${i + 1}")
+                            captureStatus = "✗ Capture error"
                         }
-                        isCapturing = false
+                        delay(CAPTURE_INTERVAL_MS)
                     }
-                    break
+
+                    // If too many consecutive failures, abort this phase and retry
+                    if (consecutiveFailures >= maxConsecutiveFailures) {
+                        Log.w("FaceScan", "Too many validation failures during capture, resetting phase")
+                        captureStatus = "Capture interrupted — please try again"
+                        // Rollback photos captured in this incomplete phase
+                        capturedPhotos = capturedPhotos.dropLast(photosInCurrentPhase)
+                        photosInCurrentPhase = 0
+                        isCapturing = false
+                        delay(1500)
+                        captureStatus = ""
+                        FaceValidator.resetStableCounter()
+                        retryTrigger++  // restart this LaunchedEffect
+                        return@LaunchedEffect
+                    }
+
+                    captureStatus = ""
+                    photosInCurrentPhase = 0
+                    scanPhase = when (scanPhase) {
+                        ScanPhase.FACE_CENTER -> ScanPhase.TURN_LEFT
+                        ScanPhase.TURN_LEFT -> ScanPhase.TURN_RIGHT
+                        ScanPhase.TURN_RIGHT -> {
+                            onCompleted(capturedPhotos)
+                            ScanPhase.COMPLETED
+                        }
+                        ScanPhase.COMPLETED -> ScanPhase.COMPLETED
+                    }
+                    isCapturing = false
+                    return@LaunchedEffect  // scanPhase changed → LaunchedEffect will re-trigger
                 }
             }
             delay(100)
@@ -316,8 +355,8 @@ fun FaceScanScreen(
  * Captures a single photo, downscales to [maxDimension] px and compresses
  * to JPEG at [quality]%. Returns the compressed bytes directly in memory.
  */
-private const val CAPTURE_MAX_DIMENSION = 640
-private const val CAPTURE_JPEG_QUALITY = 80
+private const val CAPTURE_MAX_DIMENSION = 480
+private const val CAPTURE_JPEG_QUALITY = 60
 
 internal suspend fun capturePhotoBytes(
     imageCapture: ImageCapture?,
@@ -370,8 +409,11 @@ private fun compressPhoto(rawBytes: ByteArray): ByteArray {
         sampleSize *= 2
     }
 
-    // Decode with sample size
-    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    // Decode with sample size + RGB_565 (half memory, sufficient for JPEG)
+    val decodeOpts = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.RGB_565
+    }
     val sampled = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts)
         ?: return rawBytes // fallback
 
@@ -392,5 +434,52 @@ private fun compressPhoto(rawBytes: ByteArray): ByteArray {
     bitmap.compress(Bitmap.CompressFormat.JPEG, CAPTURE_JPEG_QUALITY, out)
     bitmap.recycle()
     return out.toByteArray()
+}
+
+/**
+ * Validates that a captured JPEG image actually contains a detectable face.
+ * Runs ML Kit FaceDetection on the compressed image bytes.
+ * Returns true only if at least one face is detected.
+ *
+ * This is the **definitive** guard against uploading obstructed photos:
+ * even if the live preview validation passes (due to stale data or ML Kit
+ * inferring landmarks on a partially covered face), this check runs on the
+ * exact image that will be uploaded to the backend.
+ */
+internal suspend fun validateCapturedPhoto(jpegBytes: ByteArray): Boolean {
+    return suspendCancellableCoroutine { cont ->
+        try {
+            val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
+            if (bitmap == null) {
+                Log.e("FaceScan", "Post-capture: failed to decode JPEG")
+                cont.resume(false)
+                return@suspendCancellableCoroutine
+            }
+
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+
+            val opts = FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setMinFaceSize(0.15f)
+                .build()
+
+            FaceDetection.getClient(opts)
+                .process(inputImage)
+                .addOnSuccessListener { faces ->
+                    bitmap.recycle()
+                    val hasFace = faces.isNotEmpty()
+                    Log.d("FaceScan", "Post-capture validation: faces=${faces.size}, pass=$hasFace")
+                    cont.resume(hasFace)
+                }
+                .addOnFailureListener { e ->
+                    bitmap.recycle()
+                    Log.e("FaceScan", "Post-capture validation failed", e)
+                    cont.resume(false)
+                }
+        } catch (e: Exception) {
+            Log.e("FaceScan", "Post-capture validation error", e)
+            cont.resume(false)
+        }
+    }
 }
 

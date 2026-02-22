@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.linh.banking_ekyc.ekyc.FaceScanScreen
+import com.linh.banking_ekyc.network.RetrofitClient
 
 class FaceScanActivity : ComponentActivity() {
 
@@ -33,6 +34,8 @@ class FaceScanActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Pre-warm server connection while user scans face
+        RetrofitClient.prewarmConnection()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startFaceScan()
         } else {

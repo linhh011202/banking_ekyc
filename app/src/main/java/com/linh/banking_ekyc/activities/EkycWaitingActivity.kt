@@ -15,8 +15,10 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.linh.banking_ekyc.databinding.ActivityEkycWaitingBinding
 import com.linh.banking_ekyc.network.RetrofitClient
 import com.linh.banking_ekyc.network.SessionManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -36,6 +38,9 @@ class EkycWaitingActivity : AppCompatActivity() {
     private var sessionId: String? = null
     private var flow: String? = null
     private var email: String? = null
+
+    /** Pre-fetched FCM token — starts loading in onCreate. */
+    private var cachedFcmToken: String? = null
 
     private val ekycResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -63,6 +68,11 @@ class EkycWaitingActivity : AppCompatActivity() {
         // Register for eKYC result broadcasts
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(ekycResultReceiver, IntentFilter(ACTION_EKYC_RESULT))
+
+        // Pre-fetch FCM token immediately (runs in parallel with upload setup)
+        FirebaseMessaging.getInstance().token
+            .addOnSuccessListener { cachedFcmToken = it }
+            .addOnFailureListener { Log.e(TAG, "FCM pre-fetch failed", it) }
 
         // If photos are pending, upload them now
         val signUpPhotos = FaceScanActivity.pendingPhotos
@@ -110,6 +120,9 @@ class EkycWaitingActivity : AppCompatActivity() {
                 val leftFaces  = photos.subList(3, 6)
                 val rightFaces = photos.subList(6, 9)
 
+                val totalSizeKB = photos.sumOf { it.size } / 1024
+                Log.d(TAG, "Uploading $totalSizeKB KB total (${photos.size} photos)")
+
                 fun List<ByteArray>.toParts(fieldName: String) = mapIndexed { i, bytes ->
                     MultipartBody.Part.createFormData(
                         fieldName, "$fieldName$i.jpg",
@@ -117,13 +130,20 @@ class EkycWaitingActivity : AppCompatActivity() {
                     )
                 }
 
-                val response = RetrofitClient.authApi.uploadPhotos(
-                    authToken  = "Bearer $accessToken",
-                    leftFaces  = leftFaces.toParts("left_faces"),
-                    rightFaces = rightFaces.toParts("right_faces"),
-                    frontFaces = frontFaces.toParts("front_faces"),
-                    fcmToken   = fcmToken.toRequestBody("text/plain".toMediaTypeOrNull())
-                )
+                val startTime = System.currentTimeMillis()
+
+                val response = withContext(Dispatchers.IO) {
+                    RetrofitClient.authApi.uploadPhotos(
+                        authToken  = "Bearer $accessToken",
+                        leftFaces  = leftFaces.toParts("left_faces"),
+                        rightFaces = rightFaces.toParts("right_faces"),
+                        frontFaces = frontFaces.toParts("front_faces"),
+                        fcmToken   = fcmToken.toRequestBody("text/plain".toMediaTypeOrNull())
+                    )
+                }
+
+                val elapsed = System.currentTimeMillis() - startTime
+                Log.d(TAG, "Upload completed in ${elapsed}ms")
 
                 if (response.isSuccessful) {
                     val body = response.body()
@@ -158,6 +178,9 @@ class EkycWaitingActivity : AppCompatActivity() {
 
                 binding.subtitleTxt.text = "Uploading ${photos.size} photos..."
 
+                val totalSizeKB = photos.sumOf { it.size } / 1024
+                Log.d(TAG, "Login upload: $totalSizeKB KB total (${photos.size} photos)")
+
                 val faceParts = photos.mapIndexed { i, bytes ->
                     MultipartBody.Part.createFormData(
                         "faces", "face$i.jpg",
@@ -165,11 +188,18 @@ class EkycWaitingActivity : AppCompatActivity() {
                     )
                 }
 
-                val response = RetrofitClient.authApi.ekycLogin(
-                    email    = (email ?: "").toRequestBody("text/plain".toMediaTypeOrNull()),
-                    fcmToken = fcmToken.toRequestBody("text/plain".toMediaTypeOrNull()),
-                    faces    = faceParts
-                )
+                val startTime = System.currentTimeMillis()
+
+                val response = withContext(Dispatchers.IO) {
+                    RetrofitClient.authApi.ekycLogin(
+                        email    = (email ?: "").toRequestBody("text/plain".toMediaTypeOrNull()),
+                        fcmToken = fcmToken.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        faces    = faceParts
+                    )
+                }
+
+                val elapsed = System.currentTimeMillis() - startTime
+                Log.d(TAG, "Login upload completed in ${elapsed}ms")
 
                 if (response.isSuccessful) {
                     val body = response.body()
@@ -222,10 +252,15 @@ class EkycWaitingActivity : AppCompatActivity() {
         finish()
     }
 
-    private suspend fun getFcmToken(): String? = suspendCancellableCoroutine { cont ->
-        FirebaseMessaging.getInstance().token
-            .addOnSuccessListener { cont.resume(it) }
-            .addOnFailureListener { Log.e(TAG, "FCM token failed", it); cont.resume(null) }
+    private suspend fun getFcmToken(): String? {
+        // Use cached token if already available
+        cachedFcmToken?.let { return it }
+        // Otherwise fetch and cache
+        return suspendCancellableCoroutine { cont ->
+            FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { cachedFcmToken = it; cont.resume(it) }
+                .addOnFailureListener { Log.e(TAG, "FCM token failed", it); cont.resume(null) }
+        }
     }
 
     private fun showResult(event: String, success: Boolean) {

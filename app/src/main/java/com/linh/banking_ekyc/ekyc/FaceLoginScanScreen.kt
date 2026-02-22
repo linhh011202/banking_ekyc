@@ -24,11 +24,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.face.Face
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 private const val LOGIN_PHOTOS_COUNT = 3
-private const val LOGIN_CAPTURE_INTERVAL_MS = 600L
-private const val LOGIN_FACE_SIZE_THRESHOLD = 0.55f
+private const val LOGIN_CAPTURE_INTERVAL_MS = 150L
+private const val LOGIN_FACE_SIZE_THRESHOLD = 0.35f
 private const val LOGIN_TOTAL_TICKS = 72
 
 /**
@@ -57,8 +56,9 @@ fun FaceLoginScanScreen(
     var isDone by remember { mutableStateOf(false) }
     var captureStatus by remember { mutableStateOf("") }
     var validationResult by remember { mutableStateOf(FaceValidationResult.VALID) }
+    /** Incremented when capture fails to restart the validation loop */
+    var retryTrigger by remember { mutableIntStateOf(0) }
 
-    val captureScope = rememberCoroutineScope()
     val faceDetected = detectedFaces.isNotEmpty()
 
     val completedTicks = remember(capturedPhotos.size, isDone) {
@@ -80,7 +80,9 @@ fun FaceLoginScanScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(retryTrigger) {
+        if (isDone) return@LaunchedEffect
+        FaceValidator.resetStableCounter()
         while (!isDone && !isCapturing) {
             if (detectedFaces.isNotEmpty()) {
                 val face = detectedFaces.first()
@@ -89,30 +91,64 @@ fun FaceLoginScanScreen(
                 val faceRatio = face.boundingBox.width().toFloat() / imageWidth.coerceAtLeast(1)
                 if (result.isValid && faceRatio > LOGIN_FACE_SIZE_THRESHOLD) {
                     Log.d("FaceLoginScan", "Face detected! Starting capture.")
-                    captureScope.launch {
-                        isCapturing = true
-                        captureStatus = "Starting capture..."
+                    isCapturing = true
+                    captureStatus = "Starting capture..."
 
-                        for (i in 0 until LOGIN_PHOTOS_COUNT) {
-                            captureStatus = "Capturing photo ${i + 1}/$LOGIN_PHOTOS_COUNT..."
-                            val bytes = capturePhotoBytes(imageCapture, ContextCompat.getMainExecutor(context))
-                            if (bytes != null) {
-                                capturedPhotos = capturedPhotos + bytes
-                                Log.d("FaceLoginScan", "Captured ${capturedPhotos.size} (${bytes.size} bytes)")
-                                captureStatus = "✓ Captured ${capturedPhotos.size}/$LOGIN_PHOTOS_COUNT"
-                            } else {
-                                Log.e("FaceLoginScan", "Failed photo ${i + 1}")
-                                captureStatus = "✗ Capture error"
-                            }
-                            delay(LOGIN_CAPTURE_INTERVAL_MS)
+                    var i = 0
+                    var consecutiveFailures = 0
+                    val maxConsecutiveFailures = 10
+
+                    while (i < LOGIN_PHOTOS_COUNT && consecutiveFailures < maxConsecutiveFailures) {
+                        // Quick check: is a face still visible in live preview?
+                        if (detectedFaces.isEmpty()) {
+                            captureStatus = "Face lost — hold still"
+                            consecutiveFailures++
+                            delay(200)
+                            continue
                         }
 
-                        isDone = true
-                        isCapturing = false
-                        captureStatus = ""
-                        onCompleted(capturedPhotos)
+                        captureStatus = "Capturing photo ${i + 1}/$LOGIN_PHOTOS_COUNT..."
+                        val bytes = capturePhotoBytes(imageCapture, ContextCompat.getMainExecutor(context))
+                        if (bytes != null) {
+                            // Post-capture validation: THE definitive check
+                            val hasFace = validateCapturedPhoto(bytes)
+                            if (!hasFace) {
+                                captureStatus = "⚠ Face not clear — retrying"
+                                Log.w("FaceLoginScan", "Post-capture validation FAILED — discarding photo")
+                                consecutiveFailures++
+                                delay(150)
+                                continue
+                            }
+                            consecutiveFailures = 0
+                            capturedPhotos = capturedPhotos + bytes
+                            Log.d("FaceLoginScan", "Captured ${capturedPhotos.size} (${bytes.size} bytes)")
+                            captureStatus = "✓ Captured ${capturedPhotos.size}/$LOGIN_PHOTOS_COUNT"
+                            i++
+                        } else {
+                            Log.e("FaceLoginScan", "Failed photo ${i + 1}")
+                            captureStatus = "✗ Capture error"
+                        }
+                        delay(LOGIN_CAPTURE_INTERVAL_MS)
                     }
-                    break
+
+                    // If too many consecutive failures, abort and retry
+                    if (consecutiveFailures >= maxConsecutiveFailures) {
+                        Log.w("FaceLoginScan", "Too many validation failures, resetting")
+                        captureStatus = "Capture interrupted — please try again"
+                        capturedPhotos = emptyList()
+                        isCapturing = false
+                        delay(1500)
+                        captureStatus = ""
+                        FaceValidator.resetStableCounter()
+                        retryTrigger++  // restart this LaunchedEffect
+                        return@LaunchedEffect
+                    }
+
+                    isDone = true
+                    isCapturing = false
+                    captureStatus = ""
+                    onCompleted(capturedPhotos)
+                    return@LaunchedEffect
                 }
             }
             delay(100)

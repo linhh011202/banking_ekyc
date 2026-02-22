@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.linh.banking_ekyc.ekyc.FaceLoginScanScreen
+import com.linh.banking_ekyc.network.RetrofitClient
 
 class EkycLoginFaceScanActivity : ComponentActivity() {
 
@@ -35,6 +36,8 @@ class EkycLoginFaceScanActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Pre-warm server connection while user scans face
+        RetrofitClient.prewarmConnection()
         email = intent.getStringExtra("email") ?: ""
         if (email.isEmpty()) {
             Toast.makeText(this, "Email is required", Toast.LENGTH_LONG).show()
