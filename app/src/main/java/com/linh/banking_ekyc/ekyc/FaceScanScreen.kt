@@ -459,8 +459,8 @@ internal suspend fun validateCapturedPhoto(jpegBytes: ByteArray): Boolean {
             val inputImage = InputImage.fromBitmap(bitmap, 0)
 
             val opts = FaceDetectorOptions.Builder()
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                .setMinFaceSize(0.15f)
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+                .setMinFaceSize(0.10f)
                 .build()
 
             FaceDetection.getClient(opts)
