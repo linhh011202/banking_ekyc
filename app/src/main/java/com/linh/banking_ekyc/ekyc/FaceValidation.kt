@@ -29,8 +29,8 @@ object FaceValidator {
 
     // ── Thresholds ──────────────────────────────────────────────────────
     private const val EYE_OPEN_MIN_PROB = 0.25f
-    private const val MIN_FACE_RATIO = 0.35f
-    private const val TOO_FAR_FACE_RATIO = 0.20f
+    private const val MIN_FACE_RATIO = 0.25f
+    private const val TOO_FAR_FACE_RATIO = 0.15f
 
     // Bounding box aspect ratio (width / height). Normal frontal face ≈ 0.65 – 1.15
     private const val BB_ASPECT_RATIO_MIN = 0.50f
@@ -40,20 +40,18 @@ object FaceValidator {
     private const val MIN_FACE_CONTOUR_POINTS = 15
 
     // Bounding box stability: max allowed change ratio between frames
-    // If BB width or height changes by more than 25% between frames → obstruction
-    private const val BB_MAX_CHANGE_RATIO = 0.25f
-    // If BB center shifts by more than 20% of BB width between frames → obstruction
-    private const val BB_MAX_CENTER_SHIFT_RATIO = 0.20f
+    private const val BB_MAX_CHANGE_RATIO = 0.35f
+    private const val BB_MAX_CENTER_SHIFT_RATIO = 0.30f
 
     // Euler angle thresholds
-    private const val EULER_Y_CENTER_MAX = 12f
-    private const val EULER_Y_LEFT_MIN = 20f
-    private const val EULER_Y_RIGHT_MAX = -20f
-    private const val EULER_X_MAX = 15f
-    private const val EULER_Z_MAX = 15f
+    private const val EULER_Y_CENTER_MAX = 18f
+    private const val EULER_Y_LEFT_MIN = 15f
+    private const val EULER_Y_RIGHT_MAX = -15f
+    private const val EULER_X_MAX = 20f
+    private const val EULER_Z_MAX = 18f
 
     // Stable frame counter
-    private const val REQUIRED_STABLE_FRAMES = 3
+    private const val REQUIRED_STABLE_FRAMES = 2
     private var consecutiveValidFrames = 0
 
     // Previous frame's bounding box for stability tracking
