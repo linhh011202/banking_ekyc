@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Banking eKYC — System Architecture
+  Z-order: ① shafts (animated) → ② cards → ③ arrowheads → ④ labels
+  Ensures animated dashes never cover card content or floating labels.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" font-family="Inter, Segoe UI, Arial, sans-serif">
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0B1426"/>
+      <stop offset="100%" stop-color="#0F1D35"/>
+    </linearGradient>
+    <linearGradient id="cardDev" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0F2A22"/>
+      <stop offset="100%" stop-color="#0A1F1A"/>
+    </linearGradient>
+    <linearGradient id="cardGw" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1A2A3F"/>
+      <stop offset="100%" stop-color="#111E2F"/>
+    </linearGradient>
+    <linearGradient id="cardCloud" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E2C3D"/>
+      <stop offset="100%" stop-color="#11202F"/>
+    </linearGradient>
+    <!-- GKE Autopilot subtle fill -->
+    <linearGradient id="gkeGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1565C0" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#0D47A1" stop-opacity="0.06"/>
+    </linearGradient>
+    <!-- diagonal stripe pattern inside GKE boundary -->
+    <pattern id="gkeStripe" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="20" stroke="#4FC3F7" stroke-width="0.5" stroke-opacity="0.08"/>
+    </pattern>
+
+    <style>
+      /* dash period = 18px → animate dashoffset by -18 for seamless loop */
+      @keyframes flow { to { stroke-dashoffset: -18; } }
+      .shaft { stroke-dasharray: 12 6; stroke-dashoffset: 0; fill: none; }
+      .s-req   { animation: flow 0.7s linear infinite; }
+      .s-res   { animation: flow 1.0s linear infinite; }
+      .s-async { animation: flow 1.4s linear infinite; }
+      .s-store { animation: flow 1.8s linear infinite; }
+    </style>
+  </defs>
+
+  <!-- ══════════════════════════════════════════════
+       ① BACKGROUND
+  ══════════════════════════════════════════════ -->
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <rect x="0" y="0" width="12" height="1000" fill="#F59E0B"/>
+  <text x="60" y="62" fill="#F8FAFC" font-size="42" font-weight="800">Banking eKYC — System Architecture</text>
+  <text x="60" y="97" fill="#94A3B8" font-size="20">Android IoT client · Kong · FastAPI · Pub/Sub · DeepFace on GKE · pgvector · FCM</text>
+
+  <!-- ══════════════════════════════════════════════
+       ① GKE AUTOPILOT BOUNDARY  (drawn first — behind everything)
+  ══════════════════════════════════════════════ -->
+  <g id="gke-autopilot-boundary">
+    <!-- Outer boundary: covers Kong (x=560), Identity (x=960), FaceMatching (x=1300→1560)
+         Top y=175 (above all cards), Bottom y=750 (below Kong+Identity+FM) -->
+    <rect x="556" y="172" width="1036" height="590" rx="24"
+          fill="url(#gkeGrad)" stroke="#4FC3F7" stroke-width="2"
+          stroke-dasharray="14 6"/>
+    <!-- Stripe overlay inside boundary -->
+    <rect x="556" y="172" width="1036" height="590" rx="24"
+          fill="url(#gkeStripe)"/>
+    <!-- Badge background -->
+    <rect x="556" y="142" width="290" height="36" rx="10"
+          fill="#0D47A1" stroke="#4FC3F7" stroke-width="1.5"/>
+    <!-- Badge label (all in one text so glyphs flow without gaps) -->
+    <text x="572" y="167">
+      <tspan fill="#FFFFFF" font-size="14" font-weight="700" dx="6">GKE Autopilot</tspan>
+      <tspan fill="#90CAF9" font-size="12" dx="8">· google/cloud</tspan>
+    </text>
+  </g>
+
+  <!-- ══════════════════════════════════════════════
+       ② CONNECTOR SHAFTS  (animated dashes — below all cards)
+       Each shaft ends EXACTLY at the target card edge so the
+       card body cleanly covers the shaft tail with no gap.
+  ══════════════════════════════════════════════ -->
+  <g id="shafts">
+    <!-- Device → Kong  (cyan, request) -->
+    <path class="shaft s-req"  d="M 420 380 L 580 380" stroke="#22D3EE" stroke-width="3"/>
+
+    <!-- Kong → Identity Service  (cyan, request) -->
+    <path class="shaft s-req"  d="M 840 380 L 960 380" stroke="#22D3EE" stroke-width="3"/>
+
+    <!-- Identity Service → PubSub  (purple, async publish) -->
+    <path class="shaft s-async" d="M 1110 560 L 1110 620" stroke="#A78BFA" stroke-width="3"/>
+
+    <!-- PubSub → Face Matching  (orange, async consume) -->
+    <path class="shaft s-async" d="M 1260 670 L 1300 670" stroke="#F59E0B" stroke-width="3"/>
+
+    <!-- Face Matching → Postgres  (green, store embeddings)
+         Exits FaceMatch bottom at x=1360, goes down to y=820, then left into Postgres right edge -->
+    <path class="shaft s-store" d="M 1360 720 L 1360 820 L 1260 820"
+          stroke="#22C55E" stroke-width="3"/>
+
+    <!-- Face Matching → FCM  (orange, async return — routes around bottom)
+         Exits FaceMatch bottom at x=1500 (right-of-centre), enters FCM bottom at y=720 -->
+    <path class="shaft s-res"  d="M 1500 720 L 1500 936 L 710 936 L 710 720"
+          stroke="#F59E0B" stroke-width="2.5"/>
+
+    <!-- FCM → Device  (orange, push notification) -->
+    <path class="shaft s-res"  d="M 580 670 L 420 670" stroke="#F59E0B" stroke-width="3"/>
+  </g>
+
+  <!-- ══════════════════════════════════════════════
+       ③ CARDS  (solid backgrounds cover shaft endpoints)
+  ══════════════════════════════════════════════ -->
+
+  <!-- ── IoT Device ── -->
+  <g id="card-device">
+    <rect x="60" y="150" width="360" height="760" rx="20" fill="url(#cardDev)" stroke="#22C55E" stroke-width="2"/>
+    <text x="90" y="195" fill="#22C55E" font-size="22" font-weight="700">IoT DEVICE</text>
+    <text x="90" y="220" fill="#64748B" font-size="14">Android phone / emulator</text>
+    <!-- Phone body -->
+    <rect x="140" y="245" width="200" height="340" rx="24" fill="#0B1426" stroke="#22C55E" stroke-width="3"/>
+    <rect x="156" y="272" width="168" height="270" rx="6" fill="#0F2A22"/>
+    <circle cx="240" cy="560" r="10" fill="#22C55E" stroke="#0B1426" stroke-width="2"/>
+    <!-- Face oval -->
+    <ellipse cx="240" cy="395" rx="56" ry="72" fill="none" stroke="#22C55E" stroke-width="2.5" stroke-dasharray="6 4"/>
+    <circle cx="220" cy="385" r="5" fill="#22C55E"/>
+    <circle cx="260" cy="385" r="5" fill="#22C55E"/>
+    <path d="M 218 420 Q 240 435 262 420" stroke="#22C55E" stroke-width="2.5" fill="none"/>
+    <text x="240" y="498" fill="#22C55E" font-size="12" text-anchor="middle" font-weight="600">FACE DETECTED</text>
+    <!-- Feature chips -->
+    <g font-size="13" fill="#F8FAFC">
+      <rect x="90" y="620" width="300" height="46" rx="10" fill="#0F2A22" stroke="#22C55E" stroke-width="1.2"/>
+      <circle cx="112" cy="643" r="6" fill="#22C55E"/>
+      <text x="128" y="648">CameraX 1.5.3 — real-time capture</text>
+
+      <rect x="90" y="676" width="300" height="46" rx="10" fill="#0F2A22" stroke="#22C55E" stroke-width="1.2"/>
+      <circle cx="112" cy="699" r="6" fill="#22C55E"/>
+      <text x="128" y="704">ML Kit Face Detection (local)</text>
+
+      <rect x="90" y="732" width="300" height="46" rx="10" fill="#0F2A22" stroke="#22C55E" stroke-width="1.2"/>
+      <circle cx="112" cy="755" r="6" fill="#22C55E"/>
+      <text x="128" y="760">3 poses × 3 photos = 9 images</text>
+
+      <rect x="90" y="788" width="300" height="46" rx="10" fill="#0F2A22" stroke="#22C55E" stroke-width="1.2"/>
+      <circle cx="112" cy="811" r="6" fill="#22C55E"/>
+      <text x="128" y="816">Jetpack Compose UI · Kotlin</text>
+
+      <rect x="90" y="844" width="300" height="46" rx="10" fill="#0F2A22" stroke="#22C55E" stroke-width="1.2"/>
+      <circle cx="112" cy="867" r="6" fill="#22C55E"/>
+      <text x="128" y="872">minSdk 36 · emulator + real device</text>
+    </g>
+  </g>
+
+  <!-- ── Kong Gateway ── -->
+  <g id="card-kong">
+    <rect x="580" y="260" width="260" height="240" rx="18" fill="url(#cardGw)" stroke="#22D3EE" stroke-width="2"/>
+    <text x="710" y="300" fill="#22D3EE" font-size="20" font-weight="700" text-anchor="middle">KONG GATEWAY</text>
+    <text x="710" y="322" fill="#64748B" font-size="13" text-anchor="middle">GKE ingress · managed TLS</text>
+    <g font-size="13" fill="#F8FAFC">
+      <rect x="600" y="342" width="220" height="32" rx="8" fill="#112033"/>
+      <circle cx="618" cy="358" r="5" fill="#22D3EE"/>
+      <text x="632" y="363">Routing · rate-limit</text>
+
+      <rect x="600" y="382" width="220" height="32" rx="8" fill="#112033"/>
+      <circle cx="618" cy="398" r="5" fill="#22D3EE"/>
+      <text x="632" y="403">TLS termination</text>
+
+      <rect x="600" y="422" width="220" height="32" rx="8" fill="#112033"/>
+      <circle cx="618" cy="438" r="5" fill="#22D3EE"/>
+      <text x="632" y="443">JWT auth header</text>
+
+      <rect x="600" y="462" width="220" height="32" rx="8" fill="#112033"/>
+      <circle cx="618" cy="478" r="5" fill="#22D3EE"/>
+      <text x="632" y="483">Health checks</text>
+    </g>
+  </g>
+
+  <!-- ── Identity Service ── -->
+  <g id="card-identity">
+    <rect x="960" y="200" width="300" height="360" rx="18" fill="url(#cardCloud)" stroke="#A78BFA" stroke-width="2"/>
+    <text x="1110" y="240" fill="#A78BFA" font-size="20" font-weight="700" text-anchor="middle">IDENTITY SERVICE</text>
+    <text x="1110" y="262" fill="#64748B" font-size="13" text-anchor="middle">FastAPI · async · GKE pod</text>
+    <g font-size="13" fill="#F8FAFC">
+      <rect x="980" y="282" width="260" height="34" rx="8" fill="#14213D"/>
+      <text x="1000" y="304">POST /user/register</text>
+      <rect x="980" y="322" width="260" height="34" rx="8" fill="#14213D"/>
+      <text x="1000" y="344">POST /user/login (JWT)</text>
+      <rect x="980" y="362" width="260" height="34" rx="8" fill="#14213D"/>
+      <text x="1000" y="384">POST /ekyc/upload-photos</text>
+      <rect x="980" y="402" width="260" height="34" rx="8" fill="#14213D"/>
+      <text x="1000" y="424">POST /ekyc/login</text>
+
+      <rect x="980" y="452" width="260" height="34" rx="8" fill="#0B1426" stroke="#A78BFA" stroke-width="1"/>
+      <circle cx="1000" cy="469" r="6" fill="#A78BFA"/>
+      <text x="1016" y="474">Firebase Storage upload</text>
+
+      <rect x="980" y="492" width="260" height="34" rx="8" fill="#0B1426" stroke="#A78BFA" stroke-width="1"/>
+      <circle cx="1000" cy="509" r="6" fill="#A78BFA"/>
+      <text x="1016" y="514">publish → Pub/Sub</text>
+    </g>
+  </g>
+
+  <!-- ── GCP Pub/Sub ── -->
+  <g id="card-pubsub">
+    <rect x="960" y="620" width="300" height="100" rx="18" fill="url(#cardCloud)" stroke="#F59E0B" stroke-width="2"/>
+    <text x="1110" y="658" fill="#F59E0B" font-size="18" font-weight="700" text-anchor="middle">GCP PUB/SUB</text>
+    <text x="1110" y="682" fill="#94A3B8" font-size="13" text-anchor="middle">banking-ekyc-sign-up</text>
+    <text x="1110" y="704" fill="#94A3B8" font-size="13" text-anchor="middle">banking-ekyc-sign-in</text>
+  </g>
+
+  <!-- ── Face Matching Workers ── -->
+  <g id="card-fm">
+    <rect x="1300" y="200" width="260" height="520" rx="18" fill="url(#cardCloud)" stroke="#22C55E" stroke-width="2"/>
+    <text x="1430" y="238" fill="#22C55E" font-size="20" font-weight="700" text-anchor="middle">FACE MATCHING</text>
+    <text x="1430" y="258" fill="#64748B" font-size="13" text-anchor="middle">Python · TensorFlow · GKE</text>
+    <!-- Backbone -->
+    <rect x="1320" y="280" width="220" height="74" rx="10" fill="#0B1426" stroke="#22C55E" stroke-width="1.5"/>
+    <text x="1430" y="304" fill="#22C55E" font-size="13" text-anchor="middle" font-weight="700">BACKBONE (frozen)</text>
+    <text x="1430" y="324" fill="#F8FAFC" font-size="12" text-anchor="middle">ArcFace 512-d</text>
+    <text x="1430" y="342" fill="#F8FAFC" font-size="12" text-anchor="middle">Facenet512</text>
+    <!-- Head -->
+    <rect x="1320" y="364" width="220" height="74" rx="10" fill="#0B1426" stroke="#F59E0B" stroke-width="1.5"/>
+    <text x="1430" y="388" fill="#F59E0B" font-size="13" text-anchor="middle" font-weight="700">HEAD (we train)</text>
+    <text x="1430" y="408" fill="#F8FAFC" font-size="12" text-anchor="middle">SGDClassifier + Scaler</text>
+    <text x="1430" y="426" fill="#F8FAFC" font-size="12" text-anchor="middle">partial_fit() online</text>
+    <!-- Ensemble formula -->
+    <rect x="1320" y="450" width="220" height="60" rx="10" fill="#0F2A22"/>
+    <text x="1430" y="472" fill="#94A3B8" font-size="11" text-anchor="middle">ENSEMBLE SCORE</text>
+    <text x="1430" y="495" fill="#22D3EE" font-size="12" text-anchor="middle" font-family="Consolas, Menlo, monospace">0.5·arc + 0.3·fnet + 0.2·clf</text>
+    <!-- K8s chips -->
+    <rect x="1320" y="530" width="220" height="34" rx="8" fill="#112033"/>
+    <circle cx="1340" cy="547" r="6" fill="#22C55E"/>
+    <text x="1356" y="552" fill="#F8FAFC" font-size="12">PUBSUB_MAX_MESSAGES=20</text>
+
+    <rect x="1320" y="572" width="220" height="34" rx="8" fill="#112033"/>
+    <circle cx="1340" cy="589" r="6" fill="#22C55E"/>
+    <text x="1356" y="594" fill="#F8FAFC" font-size="12">Stateless · HPA CronJob</text>
+
+    <rect x="1320" y="614" width="220" height="34" rx="8" fill="#112033"/>
+    <circle cx="1340" cy="631" r="6" fill="#22C55E"/>
+    <text x="1356" y="636" fill="#F8FAFC" font-size="12">Docker multi-stage</text>
+
+    <rect x="1320" y="656" width="220" height="34" rx="8" fill="#112033"/>
+    <circle cx="1340" cy="673" r="6" fill="#22C55E"/>
+    <text x="1356" y="678" fill="#F8FAFC" font-size="12">RetinaFace detector</text>
+  </g>
+
+  <!-- ── Postgres + pgvector ── -->
+  <g id="card-db">
+    <rect x="960" y="740" width="300" height="160" rx="18" fill="url(#cardCloud)" stroke="#10B981" stroke-width="2"/>
+    <text x="1110" y="778" fill="#10B981" font-size="20" font-weight="700" text-anchor="middle">POSTGRES + pgvector</text>
+    <!-- DB icon -->
+    <ellipse cx="1010" cy="830" rx="28" ry="10" fill="none" stroke="#10B981" stroke-width="2"/>
+    <path d="M 982 830 L 982 870" stroke="#10B981" stroke-width="2"/>
+    <path d="M 1038 830 L 1038 870" stroke="#10B981" stroke-width="2"/>
+    <ellipse cx="1010" cy="870" rx="28" ry="10" fill="none" stroke="#10B981" stroke-width="2"/>
+    <ellipse cx="1010" cy="850" rx="28" ry="10" fill="none" stroke="#10B981" stroke-width="1.5" stroke-dasharray="3 3"/>
+    <g font-size="13" fill="#F8FAFC">
+      <text x="1060" y="824">tb_user · email, hash</text>
+      <text x="1060" y="848">tb_user_faces · embedding</text>
+      <text x="1060" y="872">  (vector 512-d, pgvector)</text>
+    </g>
+  </g>
+
+  <!-- ── Firebase FCM ── -->
+  <g id="card-fcm">
+    <rect x="580" y="620" width="260" height="100" rx="18" fill="url(#cardGw)" stroke="#F59E0B" stroke-width="2"/>
+    <text x="710" y="658" fill="#F59E0B" font-size="18" font-weight="700" text-anchor="middle">FIREBASE FCM</text>
+    <text x="710" y="682" fill="#94A3B8" font-size="13" text-anchor="middle">push notification</text>
+    <text x="710" y="702" fill="#94A3B8" font-size="13" text-anchor="middle">async result delivery</text>
+  </g>
+
+  <!-- ══════════════════════════════════════════════
+       ④ ARROWHEADS  (solid polygons, on top of cards)
+       Each polygon sits exactly at the TARGET card border.
+  ══════════════════════════════════════════════ -->
+  <g id="arrowheads">
+    <!-- → Device→Kong  (right-pointing at Kong left edge x=580, y=380) -->
+    <polygon points="568,374 580,380 568,386" fill="#22D3EE"/>
+
+    <!-- → Kong→Identity  (right-pointing at Identity left edge x=960, y=380) -->
+    <polygon points="948,374 960,380 948,386" fill="#22D3EE"/>
+
+    <!-- ↓ Identity→PubSub  (down-pointing at PubSub top y=620, x=1110) -->
+    <polygon points="1104,608 1110,620 1116,608" fill="#A78BFA"/>
+
+    <!-- → PubSub→FaceMatch  (right-pointing at FM left edge x=1300, y=670) -->
+    <polygon points="1288,664 1300,670 1288,676" fill="#F59E0B"/>
+
+    <!-- ← FaceMatch→DB  (left-pointing at DB right edge x=1260, y=820) -->
+    <polygon points="1272,814 1260,820 1272,826" fill="#22C55E"/>
+
+    <!-- ↑ FaceMatch→FCM  (up-pointing at FCM bottom edge y=720, x=710) -->
+    <polygon points="704,732 710,720 716,732" fill="#F59E0B"/>
+
+    <!-- ← FCM→Device  (left-pointing at Device right edge x=420, y=670) -->
+    <polygon points="432,664 420,670 432,676" fill="#F59E0B"/>
+  </g>
+
+  <!-- ══════════════════════════════════════════════
+       ⑤ FLOATING LABELS  (always on top — drawn last)
+  ══════════════════════════════════════════════ -->
+  <g id="labels" font-family="Inter, Segoe UI, Arial, sans-serif">
+
+    <!-- Device → Kong label  (above the shaft at y=380) -->
+    <rect x="432" y="327" width="136" height="28" rx="6" fill="#0B1426" stroke="#22D3EE" stroke-width="1"/>
+    <text x="500" y="346" fill="#22D3EE" font-size="13" text-anchor="middle" font-weight="600">HTTPS multipart</text>
+    <!-- sub-label below the shaft -->
+    <text x="500" y="400" fill="#64748B" font-size="11" text-anchor="middle">POST /api/v1/ekyc/*</text>
+
+    <!-- FCM → Device label  (above shaft at y=670) -->
+    <rect x="432" y="617" width="136" height="24" rx="6" fill="#0B1426" stroke="#F59E0B" stroke-width="1"/>
+    <text x="500" y="636" fill="#F59E0B" font-size="13" text-anchor="middle" font-weight="600">FCM push</text>
+    <text x="500" y="690" fill="#64748B" font-size="11" text-anchor="middle">signin_result /</text>
+    <text x="500" y="705" fill="#64748B" font-size="11" text-anchor="middle">signup_done</text>
+
+    <!-- Identity → PubSub label  (right of vertical shaft at x=1110) -->
+    <text x="1126" y="596" fill="#A78BFA" font-size="12">sign_up / sign_in</text>
+
+    <!-- FaceMatch → DB label  (below horizontal shaft at y=820, free space outside both cards) -->
+    <rect x="1262" y="824" width="172" height="22" rx="5" fill="#0B1426"/>
+    <text x="1348" y="839" fill="#22C55E" font-size="12" text-anchor="middle">store / retrieve embeddings</text>
+
+
+
+    <!-- FaceMatch → FCM async label  (below bottom horizontal segment at y=936) -->
+    <rect x="970" y="941" width="248" height="22" rx="5" fill="#0B1426"/>
+    <text x="1100" y="957" fill="#F59E0B" font-size="11" text-anchor="middle" font-style="italic">async FCM push result</text>
+  </g>
+
+
+
+</svg>
